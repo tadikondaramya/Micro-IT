@@ -1,0 +1,261 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import sqlite3
+from datetime import datetime
+
+# ------------------------ DATABASE SETUP ------------------------
+def init_db():
+    conn = sqlite3.connect('students.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL)''')
+    c.execute("INSERT OR IGNORE INTO users (username, password) VALUES (?, ?)", ('admin', 'admin123'))
+
+    c.execute('''CREATE TABLE IF NOT EXISTS students (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                age INTEGER,
+                grade TEXT,
+                attendance TEXT)''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER,
+                date TEXT,
+                status TEXT,
+                FOREIGN KEY(student_id) REFERENCES students(id))''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS timetable (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                grade TEXT,
+                day TEXT,
+                subject TEXT,
+                time TEXT)''')
+
+    conn.commit()
+    conn.close()
+
+# ------------------------ LOGIN WINDOW ------------------------
+def login_screen():
+    login = tk.Tk()
+    login.title("Login")
+    login.geometry("300x200")
+
+    tk.Label(login, text="Username:").pack(pady=5)
+    username_entry = tk.Entry(login)
+    username_entry.pack()
+
+    tk.Label(login, text="Password:").pack(pady=5)
+    password_entry = tk.Entry(login, show="*")
+    password_entry.pack()
+
+    def attempt_login():
+        u = username_entry.get()
+        p = password_entry.get()
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username=? AND password=?", (u, p))
+        result = c.fetchone()
+        conn.close()
+        if result:
+            login.destroy()
+            main_window()
+        else:
+            messagebox.showerror("Login Failed", "Invalid credentials")
+
+    tk.Button(login, text="Login", command=attempt_login).pack(pady=20)
+    login.mainloop()
+
+# ------------------------ MAIN APPLICATION ------------------------
+def main_window():
+    def add_student():
+        add_student_db(name_var.get(), age_var.get(), grade_var.get(), attendance_var.get())
+        messagebox.showinfo("Success", "Student added.")
+        refresh()
+
+    def add_student_db(name, age, grade, attendance):
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO students (name, age, grade, attendance) VALUES (?, ?, ?, ?)", (name, age, grade, attendance))
+        conn.commit()
+        conn.close()
+
+    def view_students():
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM students")
+        rows = c.fetchall()
+        conn.close()
+        return rows
+
+    def delete_student(student_id):
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("DELETE FROM students WHERE id = ?", (student_id,))
+        conn.commit()
+        conn.close()
+
+    def update_student(student_id, name, age, grade, attendance):
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("UPDATE students SET name=?, age=?, grade=?, attendance=? WHERE id=?", (name, age, grade, attendance, student_id))
+        conn.commit()
+        conn.close()
+
+    def search_student(student_id):
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM students WHERE id=?", (student_id,))
+        row = c.fetchone()
+        conn.close()
+        return row
+
+    def refresh():
+        records.delete(*records.get_children())
+        for row in view_students():
+            records.insert('', 'end', values=row)
+
+    def delete_selected():
+        selected = records.selection()
+        if selected:
+            student = records.item(selected[0])['values']
+            delete_student(student[0])
+            messagebox.showinfo("Deleted", f"Student ID {student[0]} deleted.")
+            refresh()
+
+    def update_selected():
+        selected = records.selection()
+        if selected:
+            student = records.item(selected[0])['values']
+            update_student(student[0], name_var.get(), age_var.get(), grade_var.get(), attendance_var.get())
+            messagebox.showinfo("Updated", f"Student ID {student[0]} updated.")
+            refresh()
+
+    def search_by_id():
+        student_id = search_var.get()
+        if student_id.isdigit():
+            student = search_student(int(student_id))
+            records.delete(*records.get_children())
+            if student:
+                records.insert('', 'end', values=student)
+            else:
+                messagebox.showwarning("Not found", "Student not found.")
+        else:
+            messagebox.showerror("Error", "Enter a valid numeric ID.")
+
+    def on_select(event):
+        selected = records.selection()
+        if selected:
+            student = records.item(selected[0])['values']
+            name_var.set(student[1])
+            age_var.set(student[2])
+            grade_var.set(student[3])
+            attendance_var.set(student[4])
+
+    def mark_attendance():
+        selected = records.selection()
+        if selected:
+            student = records.item(selected[0])['values']
+            date = datetime.now().strftime('%Y-%m-%d')
+            status = attendance_status.get()
+            conn = sqlite3.connect('students.db')
+            c = conn.cursor()
+            c.execute("INSERT INTO attendance (student_id, date, status) VALUES (?, ?, ?)", (student[0], date, status))
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Success", f"Attendance marked for {student[1]} on {date}.")
+
+    def show_timetable():
+        tt_window = tk.Toplevel(root)
+        tt_window.title("Class Timetable")
+        tt_window.geometry("500x400")
+
+        tree = ttk.Treeview(tt_window, columns=('Grade', 'Day', 'Subject', 'Time'), show='headings')
+        for col in ('Grade', 'Day', 'Subject', 'Time'):
+            tree.heading(col, text=col)
+        tree.pack(fill='both', expand=True)
+
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("SELECT * FROM timetable")
+        rows = c.fetchall()
+        conn.close()
+
+        for row in rows:
+            tree.insert('', 'end', values=row[1:])
+
+    def add_timetable_entry():
+        conn = sqlite3.connect('students.db')
+        c = conn.cursor()
+        c.execute("INSERT INTO timetable (grade, day, subject, time) VALUES (?, ?, ?, ?)",
+                  (tt_grade.get(), tt_day.get(), tt_subject.get(), tt_time.get()))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Success", "Timetable entry added.")
+
+    # GUI START
+    root = tk.Tk()
+    root.title("Student Management System")
+    root.geometry("950x600")
+
+    title = tk.Label(root, text="📘 Student Management System", font=("Helvetica", 18, "bold"), bg="#add8e6")
+    title.pack(fill=tk.X)
+
+    frame = ttk.Frame(root, padding=10)
+    frame.pack(pady=5)
+
+    name_var = tk.StringVar()
+    age_var = tk.StringVar()
+    grade_var = tk.StringVar()
+    attendance_var = tk.StringVar()
+    search_var = tk.StringVar()
+    attendance_status = tk.StringVar()
+
+    ttk.Label(frame, text="Name:").grid(row=0, column=0, sticky=tk.W)
+    ttk.Entry(frame, textvariable=name_var).grid(row=0, column=1)
+
+    ttk.Label(frame, text="Age:").grid(row=0, column=2, sticky=tk.W)
+    ttk.Entry(frame, textvariable=age_var).grid(row=0, column=3)
+
+    ttk.Label(frame, text="Grade:").grid(row=1, column=0, sticky=tk.W)
+    ttk.Entry(frame, textvariable=grade_var).grid(row=1, column=1)
+
+    ttk.Label(frame, text="Attendance:").grid(row=1, column=2, sticky=tk.W)
+    ttk.Entry(frame, textvariable=attendance_var).grid(row=1, column=3)
+
+    ttk.Button(frame, text="Add", command=add_student).grid(row=2, column=0)
+    ttk.Button(frame, text="Update", command=update_selected).grid(row=2, column=1)
+    ttk.Button(frame, text="Delete", command=delete_selected).grid(row=2, column=2)
+    ttk.Button(frame, text="Search", command=search_by_id).grid(row=2, column=3)
+
+    ttk.Label(frame, text="Search ID:").grid(row=3, column=0)
+    ttk.Entry(frame, textvariable=search_var).grid(row=3, column=1)
+
+    ttk.Label(frame, text="Attendance Status:").grid(row=3, column=2)
+    ttk.Combobox(frame, textvariable=attendance_status, values=["Present", "Absent"]).grid(row=3, column=3)
+    ttk.Button(frame, text="Mark Attendance", command=mark_attendance).grid(row=4, column=3, pady=5)
+
+    # Timetable Entry
+    ttk.Label(frame, text="Timetable Entry: Grade").grid(row=5, column=0)
+    tt_grade = tk.StringVar(); tt_day = tk.StringVar(); tt_subject = tk.StringVar(); tt_time = tk.StringVar()
+    ttk.Entry(frame, textvariable=tt_grade, width=10).grid(row=5, column=1)
+    ttk.Entry(frame, textvariable=tt_day, width=10).grid(row=5, column=2)
+    ttk.Entry(frame, textvariable=tt_subject, width=10).grid(row=6, column=1)
+    ttk.Entry(frame, textvariable=tt_time, width=10).grid(row=6, column=2)
+    ttk.Button(frame, text="Add Timetable", command=add_timetable_entry).grid(row=6, column=3)
+    ttk.Button(frame, text="View Timetable", command=show_timetable).grid(row=7, column=3, pady=5)
+
+    # Table
+    records = ttk.Treeview(root, columns=("ID", "Name", "Age", "Grade", "Attendance"), show="headings")
+    for col in ("ID", "Name", "Age", "Grade", "Attendance"):
+        records.heading(col, text=col)
+    records.pack(fill=tk.BOTH, expand=True)
+    records.bind("<<TreeviewSelect>>", on_select)
+
+    refresh()
+    root.mainloop()
+
+# ------------------------ INIT ------------------------
+init_db()
+login_screen()
